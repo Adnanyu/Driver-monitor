@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Driving Action Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f4f4f4;
+        }
+        
+        header {
+            text-align: center;
+            font-size: 2em;
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        /* Video container */
+        #video-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        #video {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            background-color: #000;
+            object-fit: contain;
+        }
+
+        #canvas {
+            display: none; /* Hidden from view but used internally */
+        }
+
+        /* Result section */
+        #result {
+            font-size: 18px;
+            color: red;
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        /* Button styling */
+        #startButton {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            font-size: 1.2em;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        #startButton:hover {
+            background-color: #0056b3;
+        }
+        #upload-section {
+            margin-bottom: 30px;
+        }
+        #result,#result2  {
+            font-size: 20px;
+            color: red;
+            margin-top: 20px;
+        }
+        #image-preview {
+            margin-top: 20px;
+            max-width: 400px;
+            max-height: 400px;
+        }
+
+        /* Responsive layout */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            header {
+                font-size: 1.5em;
+            }
+
+            #video {
+                width: 100%;
+                height: auto;
+            }
+
+            #result {
+                font-size: 16px;
+            }
+
+            #startButton {
+                width: 100%;
+                padding: 12px;
+                font-size: 1.1em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header Section -->
+    <header>
+        Real-Time Driving Action Detection
+    </header>
+
+    <!-- Video Section -->
+    <div id="video-container">
+        <video id="video" autoplay></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <!-- Result Section -->
+    <div id="result">Waiting for predictions...</div>
+
+    <!-- Button to start/stop recording -->
+    <button id="startButton">Start Recording</button>
+
+    <div id="upload-section">
+        <h2>Upload an Image to Classify</h2>
+        <input type="file" id="imageUpload" accept="image/*">
+        <button id="uploadBtn">Upload Image</button>
+    </div>
+    
+    <div id="image-preview-container">
+        <img id="image-preview" src="" alt="Image Preview" style="display: none;">
+    </div>
+
+    <div id="result2"></div>
+
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    <script>
+        const socket = io.connect('http://192.168.1.125:8000');  // Replace with your server URL for production
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const resultDiv = document.getElementById('result');
+        let recording = false; // To track the recording state
+        let mediaStream = null;
+
+        // Access the user camera
+        function startCamera() {
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(stream => {
+                    mediaStream = stream;
+                    video.srcObject = stream;
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    startButton.innerText = "Stop Recording";
+                    recording = true;
+                    captureFrame();  // Start capturing frames once the camera starts
+                })
+                .catch(error => {
+                    console.error("Error accessing camera: ", error);
+                    handleCameraError(error);
+                });
+        }
+
+        // Handle camera errors gracefully
+        function handleCameraError(error) {
+            if (error.name === "NotAllowedError") {
+                alert("Camera access was denied. Please allow access and try again.");
+            } else if (error.name === "NotFoundError") {
+                alert("No camera found. Please connect a camera and try again.");
+            } else {
+                alert("An error occurred while accessing the camera.");
+            }
+        }
+
+        // Stop the camera
+        function stopCamera() {
+            if (mediaStream) {
+                let tracks = mediaStream.getTracks();
+                tracks.forEach(track => track.stop());
+            }
+            video.srcObject = null;
+            startButton.innerText = "Start Recording";
+            recording = false;
+        }
+
+        // Toggle camera recording on button click
+        startButton.addEventListener('click', function() {
+            if (recording) {
+                stopCamera();
+            } else {
+                startCamera();
+            }
+        });
+
+        // Capture the video frame and send it to the server via WebSocket
+        function captureFrame() {
+            if (!recording) return;
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);  // Draw the video frame on canvas
+            const imageData = canvas.toDataURL('image/jpeg');  // Convert canvas to image data
+
+            // Send image data to server via WebSocket
+            socket.emit('image', { image: imageData });
+
+            // Keep capturing every 100ms (10 FPS) while recording
+            if (recording) {
+                setTimeout(captureFrame, 100);
+            }
+        }
+
+        // Handle server response (prediction result)
+        socket.on('result', function(data) {
+            if (data && data.result && data.confidence !== undefined) {
+                resultDiv.innerText = `Prediction: ${data.result} (Confidence: ${(data.confidence * 100).toFixed(2)}%)`;
+            } else {
+                console.error("Invalid server response:", data);
+            }
+        });
+
+        // Handle WebSocket connection errors
+        socket.on('connect_error', (error) => {
+            console.error("WebSocket connection error:", error);
+            alert("Unable to connect to server. Please try again later.");
+        });
+
+        // Log any other socket errors
+        socket.on('error', function(data) {
+            console.error(data.error);
+        });
+
+        const uploadBtn = document.getElementById('uploadBtn');
+        const imageUpload = document.getElementById('imageUpload');
+        const resultDiv2 = document.getElementById('result2');
+        const imagePreview = document.getElementById('image-preview');
+
+        uploadBtn.addEventListener('click', function() {
+            const file = imageUpload.files[0];
+            if (!file) {
+                alert("Please select an image to upload.");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // Display the selected image in the preview section
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                imagePreview.src = e.target.result;
+                imagePreview.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+
+            // Send the image to the Flask server
+            fetch('/upload', {
+                method: 'POST',
+                body: formData,
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.result) {
+                    resultDiv2.innerText = `Prediction: ${data.result} (Confidence: ${data.confidence})`;
+                } else {
+                    resultDiv2.innerText = `Error: ${data.error}`;
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                resultDiv2.innerText = 'An error occurred. Please try again.';
+            });
+        });
+    </script>
+</body>
+</html>

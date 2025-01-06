@@ -1,0 +1,26 @@
+/* Center everything on the page */
+body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background-color: #f0f0f0;
+}
+
+.container {
+  text-align: center;
+}
+
+/* Style the video wrapper */
+.video-wrapper {
+  display: none;
+  margin-top: 20px;
+  text-align: center;
+}
+
+video {
+  max-width: 100%;
+  height: auto;
+}
